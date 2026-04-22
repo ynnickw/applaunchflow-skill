@@ -1,18 +1,31 @@
 ---
 name: ios-marketing-capture
-description: Use when the user wants to automate capture of marketing screenshots for a SwiftUI iOS app across multiple locales, devices, or appearances. Covers full-screen shots, isolated element renders (carousel cards, widgets), and reproducible output naming. Triggers on marketing screenshots, locale screenshots, widget renders, App Store assets, fastlane-alternative, simctl screenshots.
+description: Use when the user wants to automate capture of marketing screenshots for a SwiftUI or Flutter iOS app across multiple locales, devices, or appearances. Covers full-screen shots, isolated element renders (carousel cards, widgets), and reproducible output naming. Triggers on marketing screenshots, locale screenshots, widget renders, App Store assets, fastlane-alternative, simctl screenshots, flutter screenshots.
 ---
 
 # iOS Marketing Capture
 
 ## Overview
 
-Automate reproducible marketing screenshot capture for a SwiftUI iOS app across multiple locales, with two parallel output streams:
+Automate reproducible marketing screenshot capture for a SwiftUI or Flutter iOS app across multiple locales, with two parallel output streams:
 
 1. **Full-screen captures** — every marketing-relevant screen, with deterministic seeded data, real status bar / safe-area chrome
 2. **Element captures** — isolated renders of specific components (cards, widgets, charts) at any scale, with natural background inside rounded corners and transparency outside
 
-This skill is the **capture** step. If the user also wants Apple-style marketing pages composited around the shots (device mockups, headlines, gradients), combine with the `app-store-screenshots` skill as a post-processing step.
+This skill is the **capture** step. After capture and verification, it also evaluates the resulting screenshots and preselects up to 10 App-Store-ready candidates before optionally handing them off to the **AppLaunchFlow MCP** for layout generation. This requires the `applaunchflow-mcp` MCP server to be configured.
+
+## Framework Detection
+
+Before starting, determine whether the project is **SwiftUI** or **Flutter**:
+
+- Look for `pubspec.yaml` in the project root → **Flutter**
+- Look for `*.xcodeproj` or `Package.swift` with SwiftUI imports → **SwiftUI**
+
+If the project is Flutter, skip to the **Flutter Path** section below. If SwiftUI, continue with the **SwiftUI Path** immediately following.
+
+---
+
+# SwiftUI Path
 
 ## Core Approach
 
@@ -39,17 +52,23 @@ Work through these steps in order. Do not skip ahead.
 
 ### Step 1: Gather requirements
 
-Ask the user these questions **one at a time** (do not batch them — each answer can invalidate later questions):
+**Default behavior: infer everything from the codebase and act.** Only ask when a detail is genuinely ambiguous and getting it wrong would produce a materially wrong result.
 
-1. **Screens to capture** — "Which screens do you want? Give me the navigation path or the tab name for each." Get a concrete list, not "the main flows".
-2. **Isolated elements** — "Any components you want rendered independently with transparent backgrounds? (carousel cards, widgets, hero tiles, charts, etc.)"
-3. **Locales** — "Which locales? (a) all locales in your `Localizable.xcstrings`, (b) an App Store subset I'll specify, or (c) let me give you an explicit list." If (a), grep the `.xcstrings` file for locale codes:
-   ```bash
-   python3 -c "import json; d=json.load(open('<path>/Localizable.xcstrings')); langs=set(); [langs.update(v.get('localizations',{}).keys()) for v in d['strings'].values()]; print(sorted(langs))"
-   ```
-4. **Device** — "Which simulator? (6.1\" iPhone 17 recommended for iOS 26 design features)" — verify the device is available via `xcrun simctl list devices available`.
-5. **Appearance** — "Light only, dark only, or both?"
-6. **Seed data** — "How is demo data populated today? (a) fresh install seeds it automatically, (b) there's a debug 'Load Demo Data' button, (c) you add it manually, (d) no demo data exists yet." Then: "Is the existing data exhaustive enough that every screen you listed looks populated for marketing? Audit it with the user."
+Auto-detect the following during exploration (Step 2) before asking any questions:
+
+- **Screens** — enumerate all user-visible screens from the navigation structure (tabs, routes, pushed views). Default to capturing all marketing-relevant screens. Only ask if the app has 15+ screens and you need to prioritize.
+- **Locales** — discover supported locales from `Localizable.xcstrings`, `.arb` files, or `supportedLocales` in the code. Default to all discovered locales. Only ask if there are 10+ locales and you want to confirm scope.
+- **Device** — check for a booted simulator via `xcrun simctl list devices booted`. Use it. If none is booted, use iPhone 17 or the latest available. Only ask if no simulator is available.
+- **Appearance** — default to light only. Only ask if the app has explicit dark mode theming.
+- **Seed data** — determine from exploration whether demo data exists. If not, create a seeder. Don't ask the user to describe their data strategy — audit the code.
+
+If the user gives a vague request like "capture screenshots for my app," proceed with exploration immediately. If they give a specific request like "capture Home, Library, and Progress screens in English and German," respect those constraints.
+
+The only question worth asking upfront if not inferable:
+
+- **Isolated elements** — "I see cards/widgets/charts in your app. Want me to render any of these as isolated elements with transparent backgrounds, or just full-screen captures?"
+
+Skip this too if the user said "all screens" or similar — just capture full screens and mention element rendering as a follow-up option.
 
 ### Step 2: Exploration
 
@@ -67,6 +86,12 @@ Before writing any code, explore the codebase enough to answer:
 - Does the app use **Live Activities** / ActivityKit? If yes, flag this as a known gotcha (see below).
 - Does the app use **SwiftData + CloudKit sync** (`cloudKitDatabase: .automatic`)? If yes, flag as a known gotcha.
 - Does any view need to be **captured in a non-default state**? (e.g. a timer mid-countdown, a form partially filled, a chart with specific values). If yes, each needs a `static var` priming mechanism (see "Priming view state" below).
+- **What locales are supported?** Discover from `Localizable.xcstrings`:
+  ```bash
+  python3 -c "import json; d=json.load(open('<path>/Localizable.xcstrings')); langs=set(); [langs.update(v.get('localizations',{}).keys()) for v in d['strings'].values()]; print(sorted(langs))"
+  ```
+  Or from `.lproj` directories: `ls -d *.lproj | sed 's/.lproj//'`. Default to all discovered locales.
+- **What device is currently booted?** Check with `xcrun simctl list devices booted`. Use the booted simulator. If none is booted, default to iPhone 17.
 
 ### Step 3: Present design to user
 
@@ -101,6 +126,130 @@ Key files to produce:
 Do **not** hand the script to the user and wait. Run it yourself against a simulator and verify at least one locale before declaring done. Read the output PNGs with the Read tool to visually verify each screen shows what you expect. Common runtime issues are listed in "Known Gotchas" below.
 
 When you find an issue, fix it, rerun the whole script (not just the failing locale — fixes can regress earlier locales), and re-verify visually.
+
+### Step 6: Evaluate and preselect App Store candidates
+
+After Step 5 verification passes, evaluate the captured **full-screen** screenshots and produce a shortlist of up to **10** files that are strongest for App Store use.
+
+Do not skip this step when the user wants store-ready assets. The App Store upload limit is 10 screenshots per size class, so the skill should reduce a large capture set into a curated marketing sequence.
+
+Rules:
+
+- Evaluate **full-screen captures only**. Ignore `elements/` renders for shortlist selection.
+- Use the **primary locale** as the source of truth for selection quality unless the user explicitly asks for locale-specific curation.
+- Prefer a coherent story over raw completeness. The shortlist should feel like a landing page sequence, not a dump of every screen.
+- Aim for **6-10** screenshots when possible. Use fewer only if the app genuinely has fewer strong marketing screens.
+- Every selected screenshot must earn its slot. If two images communicate the same feature, keep the stronger one.
+
+Selection criteria:
+
+- **Instant clarity**: a user should understand the screen's value in under 2 seconds.
+- **Feature relevance**: the screen should represent a feature worth marketing, not just navigation chrome.
+- **Visual strength**: populated UI, good hierarchy, clear focal point, attractive data density.
+- **Distinctiveness**: each chosen screenshot should add a new message or product angle.
+- **Composability**: the screen should work well inside App Store layouts with space for headlines and framing.
+- **State quality**: avoid loading states, empty states, placeholder copy, debug controls, or accidental overlays unless the empty state itself is intentionally marketable.
+
+Hard exclusions:
+
+- Settings screens unless the app's core value is configuration or customization.
+- Redundant variants of the same list/detail state with no new marketing value.
+- Transitional modals, alerts, toasts, permission prompts, and half-dismissed sheets.
+- Screens whose meaning depends on prior explanation.
+- Screens with visibly fake, broken, clipped, or sparse seed data.
+
+Story-building heuristic:
+
+1. Start with the clearest hero/value screen.
+2. Follow with the most important core workflow screens.
+3. Include proof-of-value screens: results, analytics, progress, personalization, or output.
+4. Include secondary differentiators only if they add something new.
+5. End with a strong closing screen only if it is genuinely compelling.
+
+Deliverables:
+
+- A ranked shortlist of up to 10 filenames with one-line reasons for each.
+- A curated folder at `marketing/<primaryLocale>/app-store-shortlist/` containing only the selected full-screen PNGs, renamed in presentation order.
+- If multiple locales were captured, mirror the same shortlist filenames into each locale's `app-store-shortlist/` folder when the corresponding localized PNG exists. If a locale is missing a counterpart, flag it explicitly instead of guessing.
+
+Implementation notes:
+
+- Inspect the actual PNGs visually before selecting. Do not infer quality from filenames alone.
+- Use local image viewing/reading tools on the generated files.
+- Keep the original capture output untouched. The shortlist is an additional curated export.
+- Rename shortlisted files with stable sequence numbers, e.g. `01-hero.png`, `02-plan-overview.png`, `03-progress.png`.
+
+### Step 7: Generate App Store screenshot layouts (optional)
+
+After Step 6 shortlist evaluation is done, ask the user:
+
+> "Screenshots captured and verified. Would you like me to generate App Store screenshot layouts using AppLaunchFlow? This creates professional marketing layouts with device frames, headlines, and backgrounds."
+
+If the user declines, stop here — the capture pipeline is done.
+
+#### 7a. Create project
+
+Use the `create_project` MCP tool. Infer values from the codebase explored in Step 2:
+
+- `appName` — the Xcode scheme or product display name. Ask only if ambiguous.
+- `platform` — `"ios"`
+- `category` — infer from the app's purpose (e.g. "Health & Fitness", "Productivity"). Ask only if genuinely unclear.
+- `appDescription` — one-sentence summary inferred from exploration.
+
+Store the returned `projectId`.
+
+#### 7b. Upload screenshots
+
+Use the `upload_screenshots` MCP tool:
+
+- `projectId` — from 7a
+- `deviceType` — `"mobile"`
+- `platform` — `"ios"`
+- `sources` — `[{ "path": "marketing/<primaryLocale>/app-store-shortlist/" }]` where `<primaryLocale>` is the first entry in the `LOCALES` array
+
+The tool auto-expands directories, picking up only top-level image files.
+
+Upload only the curated **primary locale** shortlist. These are the source screenshots for layout generation. Element renders (cards, widgets) are not used by `generate_layouts`.
+
+#### 7c. Select a template
+
+Use the `browse_templates` MCP tool:
+
+- `deviceType` — `"phone"`
+- `title` — the app name from 7a
+
+This opens a visual gallery. Wait for the user to select a template. Store the returned `templateId`.
+
+#### 7d. Generate layouts
+
+Use the `generate_layouts` MCP tool:
+
+- `generationId` — the `projectId` from 7a (`generationId` = `projectId`)
+- `templateId` — from 7c (if selected)
+- `deviceType` — `"phone"`
+
+**Present the returned `editorUrl` to the user.** This is their entry point to review and refine layouts in the visual editor.
+
+#### 7e. Translate layouts (if multiple locales)
+
+If the capture ran for more than one locale, ask:
+
+> "Your screenshots were captured in N locales: [list]. Would you like me to translate the App Store layout text for the other locales?"
+
+If yes, use the `translate_layouts` MCP tool:
+
+- `generationId` — the `projectId`
+- `targetLanguages` — all captured locale codes except the primary locale
+- `layouts` — `["mobile"]`
+
+**Important:** `translate_layouts` translates the **marketing copy** in the layouts (headlines, subtitles), not the app UI text. The app UI is already localized in the per-locale screenshots. If the user wants each locale's layout to show that locale's own shortlisted screenshots instead of translated headlines over the primary-locale shortlist, this requires uploading shortlisted screenshots per locale and generating separate layouts — flag this as an advanced workflow.
+
+#### Error handling
+
+- **Auth failures on any MCP call:** Tell the user to verify the AppLaunchFlow MCP server is configured and authenticated (`npx @applaunchflow/mcp@latest auth login`).
+- **`upload_screenshots` fails:** Verify files exist at `marketing/<locale>/` by listing the directory.
+- **`generate_layouts` fails:** Call `list_screenshots` to verify uploads succeeded.
+- **`browse_templates` returns a URL instead of completing interactively:** Present the gallery URL to the user and ask them to reply with the template name or id.
 
 ## Architecture: Step-Based Capture
 
@@ -460,6 +609,368 @@ try? await Task.sleep(for: .milliseconds(500))  // let onAppear animations finis
 let renderer = ImageRenderer(content: view)
 ```
 
+---
+
+# Flutter Path
+
+## Core Approach
+
+**Separate entry point + simctl capture.** Flutter apps can't use SwiftUI's `UIWindow.drawHierarchy` or `ImageRenderer`. Instead, the skill creates a standalone Dart entry point (`lib/main_screenshots.dart`) that:
+
+1. Initializes Firebase (or other backend) but puts state management in **offline mode** — no Firestore listeners, no auth gates
+2. Seeds demo data directly into the app's state services
+3. Auto-navigates through all screens using a coordinator with timed steps
+4. Writes sentinel files to `/tmp/` to signal the shell script when each screen is ready
+5. A shell script runs `flutter run -t lib/main_screenshots.dart`, watches for sentinels, and captures each screen via `xcrun simctl io <device> screenshot`
+
+Why this approach over integration_test:
+
+- **No Firebase permission issues.** Integration tests create a fresh app install with a new anonymous user. Firestore security rules often reject these users, causing `permission-denied` errors that crash the test. The offline-mode approach bypasses Firestore entirely.
+- **No test framework overhead.** `flutter test integration_test/` has flaky `pumpAndSettle` behavior with animations, Firebase streams, and timers. The separate entry point runs the real app widget tree.
+- **Real rendering.** Screenshots via `simctl io` capture the full native frame — status bar, safe area, system chrome — exactly as a user would see it.
+- **Simpler debugging.** The app runs normally in debug mode with hot reload available. You can iterate on the coordinator without rebuilding.
+
+## Process (Flutter)
+
+Work through these steps in order.
+
+### Step 1: Gather requirements (same as SwiftUI)
+
+Infer everything from the codebase and act. Same auto-detect-first principle as the SwiftUI path — only ask when genuinely ambiguous. For Flutter, locale discovery comes from `supportedLocales` in `MaterialApp` or `.arb` files in `lib/l10n/`.
+
+### Step 2: Exploration (Flutter-specific)
+
+Before writing any code, explore the codebase enough to answer:
+
+- **What state management is used?** Provider, Riverpod, Bloc, GetX, or vanilla? You need to know how to create an instance with seeded data and provide it to the widget tree.
+- **What is the root navigation pattern?**
+  - `NavigationBar` / `BottomNavigationBar` with `IndexedStack` — most common. You need: the tab index state, the list of screen widgets.
+  - `GoRouter` / `Navigator 2.0` — you need: the router configuration and how to push routes programmatically.
+  - `Navigator.push` (imperative) — you need: the route builders for each screen.
+- **What backend services does the app depend on?** Firebase Auth, Firestore, Supabase, REST APIs? Each service that runs at startup needs to be either initialized or bypassed.
+- **Does the state management class accept dependency injection?** Look for constructor parameters like `AppState({AuthService? authService, ...})`. If the state class can be constructed with mock/null services, the offline approach is straightforward.
+- **Where are locales defined?** Check `supportedLocales` in `MaterialApp`, look for `.arb` files, `Localizable.xcstrings`, or custom localization systems.
+- **Is there existing demo/seed data?** Check for test fixtures, debug menus, or seed functions.
+- **Does the app have onboarding or auth gates?** You need to bypass these in the screenshot entry point.
+
+### Step 3: Present design to user (same as SwiftUI)
+
+Same structure — get approval before writing code.
+
+### Step 4: Implement (Flutter)
+
+Use the templates in `templates/` as starting points. Key files to produce:
+
+#### 4a. Add `offlineMode` to the state management class
+
+Add a flag to the app's primary state class that skips all backend initialization:
+
+```dart
+class AppState extends ChangeNotifier {
+  AppState({
+    this.offlineMode = false,
+    String? overrideUserName,
+  }) {
+    if (offlineMode) {
+      _isLoading = false;
+      if (overrideUserName != null) _userName = overrideUserName;
+      return; // Skip Firebase/Firestore/auth initialization
+    }
+    _initialize(); // Normal startup
+  }
+
+  final bool offlineMode;
+```
+
+For Riverpod apps, create an override provider. For Bloc, create a pre-seeded bloc instance.
+
+Also add a public method to trigger stats/cache computation if the class has private preloading:
+
+```dart
+/// Public so screenshot mode can trigger after seeding.
+void refreshStats() => _preloadStats();
+```
+
+#### 4b. Create `lib/main_screenshots.dart`
+
+This is the screenshot entry point. Structure:
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(); // If needed
+
+  final appState = AppState(offlineMode: true, overrideUserName: 'Luna');
+  _seedDemoData(appState);
+  appState.refreshStats(); // Trigger cached stat computation
+
+  runApp(_ScreenshotApp(appState: appState));
+}
+```
+
+Key rules:
+- Provide the state object as the **real type** the screens expect (e.g., `Provider<AppState>.value(value: appState)`). Don't create a mock subclass — the screens use `context.watch<AppState>()` and the type must match.
+- Skip auth wrappers and splash screens. Go directly to the main shell widget.
+- Use `IndexedStack` with tab index state for the coordinator to switch tabs without rebuilding.
+- For detail screens (pushed via Navigator), use `setState` to swap an overlay widget rather than `Navigator.push` — this keeps the coordinator in control.
+
+#### 4c. Build the coordinator
+
+The coordinator is a `StatefulWidget` that auto-navigates through screens on a timer and writes sentinel files:
+
+```dart
+class _ScreenshotCoordinator extends StatefulWidget { ... }
+
+class _ScreenshotCoordinatorState extends State<_ScreenshotCoordinator> {
+  int _tabIndex = 0;
+  bool _showingOverlay = false;
+  Widget? _overlayScreen;
+
+  Future<void> _runCaptureSequence() async {
+    const pause = Duration(seconds: 3);
+
+    // Tab screens
+    for (final (index, name) in [(0, '01-home'), (1, '02-routine'), ...]) {
+      setState(() => _tabIndex = index);
+      await Future.delayed(const Duration(seconds: 2));
+      _writeSentinel(name);
+      await Future.delayed(pause);
+    }
+
+    // Detail screens via overlay
+    setState(() {
+      _showingOverlay = true;
+      _overlayScreen = DetailScreen(item: someItem);
+    });
+    await Future.delayed(const Duration(seconds: 2));
+    _writeSentinel('05-detail');
+    await Future.delayed(pause);
+    setState(() { _showingOverlay = false; _overlayScreen = null; });
+  }
+}
+```
+
+Sentinel files are written to `/tmp/<app>-screenshots/<name>.ready`. A `_done` sentinel signals completion.
+
+#### 4d. Seed demo data
+
+Create a `_seedDemoData(AppState appState)` function that populates all services directly:
+
+```dart
+void _seedDemoData(AppState appState) {
+  final techniques = appState.techniqueService.all;
+
+  // Session logs — 60 days of realistic history
+  for (int daysAgo = 0; daysAgo < 60; daysAgo++) {
+    if (daysAgo % 7 == 6) continue; // Skip some days
+    appState.logService.addLog(SessionLog(
+      id: 'demo-$daysAgo',
+      dateTime: DateTime.now().subtract(Duration(days: daysAgo)),
+      // ...
+    ));
+  }
+
+  // Routines, favorites, etc.
+  appState.routineService.itemsList.addAll([...]);
+}
+```
+
+Rules:
+- Seed **enough data** that every screen looks populated. Audit each captured screen against the seed.
+- Use realistic content: plausible names, varied states, mixed completion statuses.
+- Access services directly (`.addLog()`, `.itemsList.addAll()`) rather than going through methods that trigger Firestore writes.
+
+#### 4e. Create `scripts/capture-screenshots.sh`
+
+The shell script coordinates `flutter run` with `simctl io` screenshot capture:
+
+```bash
+flutter run -t lib/main_screenshots.dart -d "$DEVICE_ID" --no-hot &
+FLUTTER_PID=$!
+
+# Wait for each sentinel, capture screenshot
+for SCREEN in "01-home" "02-routine" ...; do
+    while [ ! -f "/tmp/app-screenshots/$SCREEN.ready" ]; do sleep 0.5; done
+    sleep 0.5  # Let rendering settle
+    xcrun simctl io "$DEVICE_ID" screenshot "$OUT_DIR/$SCREEN.png"
+done
+```
+
+**Critical:** Use absolute paths for screenshot output. `flutter run` may reset the shell's working directory.
+
+#### 4f. Multi-locale capture (Flutter)
+
+Unlike SwiftUI where each locale requires a separate `simctl launch`, Flutter can switch locales without relaunching. There are two approaches — pick the one that fits the project.
+
+##### Approach A: `--dart-define` per-run (preferred for ≤ 3 locales)
+
+Add a compile-time locale override to `main_screenshots.dart`:
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+
+  final appState = AppState(offlineMode: true, overrideUserName: 'Luna');
+
+  // Allow locale override via --dart-define=SCREENSHOT_LOCALE=de
+  const localeOverride = String.fromEnvironment('SCREENSHOT_LOCALE');
+  if (localeOverride.isNotEmpty) {
+    appState.setLocale(Locale(localeOverride));
+  }
+
+  _seedDemoData(appState);
+  appState.refreshStats();
+  runApp(_ScreenshotApp(appState: appState));
+}
+```
+
+Then run the capture script once per locale with a different output directory:
+
+```bash
+# English (default)
+flutter run -t lib/main_screenshots.dart -d "$DEVICE_ID" --no-hot
+
+# German
+flutter run -t lib/main_screenshots.dart -d "$DEVICE_ID" --no-hot \
+  --dart-define=SCREENSHOT_LOCALE=de
+```
+
+The shell script stays unchanged — just point `OUT_DIR` to `marketing/de` for the second run. The coordinator, sentinel logic, and screen list are all identical.
+
+Why this is often better:
+
+- **Zero coordinator changes.** The coordinator captures screens exactly once per run — no outer locale loop, no locale-prefixed sentinels.
+- **Simpler debugging.** Each locale is a separate run. If German fails, you re-run just German.
+- **No risk of locale switch not taking effect.** Some widgets cache text on first build — a fresh process ensures clean localization.
+
+Downside: each locale is a separate `flutter run`, so there's build overhead. For 2-3 locales this is negligible; for 10+ locales, use Approach B.
+
+##### Approach B: In-process locale loop (better for 4+ locales)
+
+The coordinator loops through all locales in a single run, switching `appState.currentLocale` between them:
+
+```dart
+Future<void> _runCaptureSequence() async {
+  final appState = context.read<AppState>();
+  final locales = [const Locale('en'), const Locale('de')]; // From supportedLocales
+
+  for (final locale in locales) {
+    final langCode = locale.languageCode;
+
+    // Switch locale and let the widget tree rebuild
+    await appState.setLocale(locale);
+    await Future.delayed(const Duration(seconds: 2));
+
+    // Capture all screens for this locale
+    for (final (index, name) in [(0, '01-home'), (1, '02-routine'), ...]) {
+      setState(() => _tabIndex = index);
+      await Future.delayed(const Duration(seconds: 2));
+      _writeSentinel('$langCode/$name'); // e.g. "en/01-home", "de/01-home"
+      await Future.delayed(const Duration(seconds: 3));
+    }
+
+    // Detail/overlay screens...
+  }
+  _writeDone();
+}
+```
+
+**Sentinel naming convention:** `<locale>/<screen>` — e.g., `en/01-home.ready`, `de/01-home.ready`.
+
+**Shell script adaptation for multi-locale:**
+
+```bash
+LOCALES=(en de)
+SCREENS=("01-home" "02-routine" "03-library" "04-progress")
+
+for L in "${LOCALES[@]}"; do
+    mkdir -p "$ABS_OUT_DIR/$L"
+    for SCREEN in "${SCREENS[@]}"; do
+        while [ ! -f "$SENTINEL_DIR/$L/$SCREEN.ready" ]; do sleep 0.5; done
+        sleep 0.5
+        xcrun simctl io "$DEVICE_ID" screenshot "$ABS_OUT_DIR/$L/$SCREEN.png"
+        echo "    ✓ $L/$SCREEN"
+    done
+done
+```
+
+**Locale discovery:** Auto-detect from the app's `supportedLocales`:
+
+```bash
+grep -oP "Locale\('([a-z]{2})'\)" lib/main.dart | grep -oP "'[a-z]{2}'" | tr -d "'"
+```
+
+Or from `.arb` files:
+
+```bash
+ls lib/l10n/app_*.arb | sed 's/.*app_\(.*\)\.arb/\1/'
+```
+
+### Step 5: Verify iteratively (same as SwiftUI)
+
+Run the script, read the PNGs visually, fix issues, re-run.
+
+### Step 6: Evaluate and shortlist (same as SwiftUI)
+
+Same criteria and process.
+
+### Step 7: Generate App Store layouts (same as SwiftUI)
+
+Same AppLaunchFlow MCP workflow.
+
+## Flutter Known Gotchas
+
+These are all real bugs encountered during Flutter screenshot capture.
+
+### F1. Firestore streams overwrite seeded data
+
+If the state management class sets up Firestore stream listeners (`getSessionLogsStream().listen(...)`) that call methods like `updateLogsFromFirestore([])`, those listeners will fire even in "offline" mode and clear your seeded demo data with empty results.
+
+Fix: The `offlineMode` flag must `return` from the constructor **before** any stream listeners are set up. The flag must prevent `_initialize()`, `_initializeUser()`, and any `authStateChanges.listen()` from running.
+
+### F2. Provider type must match exactly
+
+Screens use `context.watch<AppState>()` which requires a `Provider<AppState>`. If you create a `MockAppState` subclass, the type won't match and `Provider.of<AppState>()` will throw. Always use the **real class** with an offline flag, not a mock subclass.
+
+### F3. Firebase must still be initialized
+
+Even in offline mode, `Firebase.initializeApp()` must be called before creating service objects. `AuthService()` accesses `FirebaseAuth.instance` and `FirestoreService()` accesses `FirebaseFirestore.instance` at field-declaration time — these crash if Firebase isn't initialized, even if you never use them.
+
+### F4. Stats caching prevents demo data from showing
+
+If the state class uses a `_cachedStats` object (populated by an async `_preloadStats()` method), the cached stats will be null after offline construction and all stat getters will return 0. Call `refreshStats()` after seeding data, and ensure `_preloadStats()` doesn't depend on Firestore.
+
+### F5. `flutter run` resets shell working directory
+
+When running `flutter run` in the background from a shell script, the working directory may be reset when the process exits. Always use **absolute paths** for `simctl io screenshot` output. Relative paths silently write to the wrong directory.
+
+### F6. Overlay screens vs Navigator.push for detail views
+
+Using `Navigator.push` from the coordinator to show detail screens works but makes it harder to dismiss them reliably. The overlay approach (swap a widget in the coordinator's `build()` method) is more reliable:
+
+```dart
+if (_showingOverlay && _overlayScreen != null) {
+  return _overlayScreen!;
+}
+return Scaffold(body: IndexedStack(...), bottomNavigationBar: ...);
+```
+
+This avoids Navigator stack management issues and gives the coordinator full control.
+
+### F7. Animations need time to settle
+
+Flutter entry animations (from `flutter_animate`, `AnimatedContainer`, etc.) need time to complete before capture. Use at least 2 seconds of settle time after switching tabs, and 8+ seconds for screens with countdowns or complex animations.
+
+### F8. Locale switching in Flutter
+
+Flutter handles locale via the `MaterialApp.locale` property, not via `simctl launch` arguments. Two approaches exist (see section 4f):
+
+- **Approach A (`--dart-define`):** Pass `--dart-define=SCREENSHOT_LOCALE=de` at build time and read it with `String.fromEnvironment('SCREENSHOT_LOCALE')`. Each locale is a separate `flutter run`. No coordinator changes needed. Preferred for ≤ 3 locales.
+- **Approach B (in-process loop):** The coordinator switches `appState.currentLocale` programmatically and captures all screens per locale in a single run. Better for 4+ locales to avoid repeated build overhead.
+
+With either approach, verify that locale switching actually took effect by comparing file sizes between locales (see Verification Checklist). Some widgets cache text on first build — if using Approach B and seeing identical screenshots across locales, switch to Approach A.
+
 ## Output Layout
 
 ```
@@ -469,6 +980,10 @@ marketing/
         02-<screen>.png
         ...
         NN-<screen>.png
+        app-store-shortlist/
+            01-<selected-screen>.png
+            02-<selected-screen>.png
+            ...
         elements/
             card-<name>.png
             widget-<family>-<size>.png
@@ -485,10 +1000,24 @@ Before declaring the capture pipeline done, verify:
 - [ ] File sizes differ between locales (confirms translations actually render — if `en/settings.png` and `de/settings.png` are byte-identical, locale switching didn't take effect)
 - [ ] Read 2-3 screens visually for the primary locale and confirm they show the expected content
 - [ ] Read the same screens for at least one other locale and confirm localized strings are present
-- [ ] Read at least one widget render and one card render to verify backgrounds and corners look right
+- [ ] Read at least one widget render and one card render to verify backgrounds and corners look right (SwiftUI only)
 - [ ] No screenshot shows a screen from a *different* step (the most common bug — an undismissed sheet from the previous step)
+- [ ] No screenshot shows empty state where data should be populated (Flutter gotcha F1 — Firestore streams clearing seeded data)
+- [ ] User name is not "Guest" or a default placeholder (use `overrideUserName` parameter)
+- [ ] Stats, streaks, and cached values are populated (call `refreshStats()` after seeding — Flutter gotcha F4)
+- [ ] A ranked shortlist of up to 10 primary-locale full-screen screenshots was produced with explicit reasons
+- [ ] `marketing/<primaryLocale>/app-store-shortlist/` exists and contains only the curated full-screen shots in presentation order
+- [ ] If multiple locales matter for delivery, corresponding shortlist folders were mirrored or any missing counterparts were called out explicitly
+- [ ] If Step 7 was run: editor URL was presented to the user and layouts were generated successfully
 
 ## Templates
 
+### SwiftUI
+
 - `templates/MarketingCapture.swift.template` — skeleton of the capture file with step-based coordinator. Reference the body of this skill for the patterns to apply.
 - `templates/capture-marketing.sh.template` — skeleton of the shell script. Replace the bundle ID, scheme name, and simulator name for each project.
+
+### Flutter
+
+- `templates/main_screenshots.dart.template` — standalone screenshot entry point with offline AppState, demo data seeder, and auto-navigation coordinator.
+- `templates/capture-screenshots-flutter.sh.template` — shell script that runs `flutter run` in the background and captures via `simctl io` synchronized with sentinel files.

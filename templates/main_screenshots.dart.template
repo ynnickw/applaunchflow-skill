@@ -1,0 +1,290 @@
+// TEMPLATE — reference patterns for building a Flutter marketing screenshot system.
+//
+// This is NOT copy-paste scaffolding. Every project has different state management,
+// navigation, models, and backend services. Read the SKILL.md Flutter Path for the
+// reasoning behind each pattern, then compose the pieces that apply to your project.
+//
+// The three components:
+//   1. main() with offline AppState       — bypass auth/Firestore, seed demo data
+//   2. _ScreenshotCoordinator             — auto-navigate through screens with sentinels
+//   3. _seedDemoData()                    — populate all services with realistic content
+//
+// Prerequisites:
+//   - The app's primary state class must accept an `offlineMode` flag that skips
+//     all backend initialization (Firebase listeners, auth checks, Firestore streams).
+//   - If the state class caches stats asynchronously, expose a public `refreshStats()`.
+//   - Firebase.initializeApp() must still be called (services access Firebase instances
+//     at field-declaration time).
+
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+// import 'package:flutter_localizations/flutter_localizations.dart';
+// import 'package:provider/provider.dart';
+// import 'package:firebase_core/firebase_core.dart';
+
+// Import your app's state, services, theme, screens, and models.
+// import 'services/app_state.dart';
+// import 'theme/app_theme.dart';
+// import 'ui/screens/home_screen.dart';
+// ...
+
+// ============================================================================
+// ENTRY POINT
+// ============================================================================
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase if the app requires it.
+  // await Firebase.initializeApp();
+
+  // Create state in offline mode — no Firestore listeners, no auth gates.
+  // final appState = AppState(offlineMode: true, overrideUserName: 'Luna');
+
+  // Seed demo data BEFORE runApp so the first frame has content.
+  // _seedDemoData(appState);
+
+  // Trigger cached stat computation if applicable.
+  // appState.refreshStats();
+
+  // runApp(_ScreenshotApp(appState: appState));
+}
+
+// ============================================================================
+// DEMO DATA SEEDER
+// ============================================================================
+//
+// Populate all services directly — bypass methods that trigger Firestore writes.
+// Seed enough data that every screen looks populated for marketing.
+//
+// void _seedDemoData(AppState appState) {
+//   final now = DateTime.now();
+//   final items = appState.itemService.all;
+//
+//   // Session/activity logs — create 30-60 days of realistic history
+//   for (int daysAgo = 0; daysAgo < 60; daysAgo++) {
+//     if (daysAgo % 7 == 6) continue; // Skip some days for realism
+//     appState.logService.addLog(ActivityLog(
+//       id: 'demo-$daysAgo',
+//       dateTime: now.subtract(Duration(days: daysAgo, hours: 7)),
+//       durationMinutes: [5, 8, 10, 12, 15][daysAgo % 5],
+//       // ... other fields
+//     ));
+//   }
+//
+//   // Routines / recurring items
+//   appState.routineService.itemsList.addAll([
+//     RoutineItem(
+//       id: 'demo-r1',
+//       title: 'Morning Routine',
+//       timeOfDay: const TimeOfDay(hour: 7, minute: 0),
+//       durationMinutes: 10,
+//       completedToday: true,
+//     ),
+//     // ... more routines
+//   ]);
+// }
+
+// ============================================================================
+// APP WRAPPER
+// ============================================================================
+//
+// Provides the offline AppState to the widget tree and skips auth/splash.
+//
+// class _ScreenshotApp extends StatelessWidget {
+//   final AppState appState;
+//   const _ScreenshotApp({required this.appState});
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return MultiProvider(
+//       providers: [
+//         ChangeNotifierProvider<AppState>.value(value: appState),
+//         // Add other providers the screens expect
+//       ],
+//       child: Consumer<AppState>(
+//         builder: (context, appState, _) {
+//           return MaterialApp(
+//             debugShowCheckedModeBanner: false,
+//             theme: AppTheme.light(),
+//             locale: appState.currentLocale,
+//             // localizationsDelegates: [...],
+//             // supportedLocales: [...],
+//             home: const _ScreenshotCoordinator(),
+//           );
+//         },
+//       ),
+//     );
+//   }
+// }
+
+// ============================================================================
+// SCREENSHOT COORDINATOR
+// ============================================================================
+//
+// Auto-navigates through all screens on a timer.
+// Writes sentinel files so the shell script knows when to capture.
+//
+// Key design decisions:
+//   - Uses IndexedStack for tab switching (no rebuild, instant switch)
+//   - Uses overlay widget swap for detail/modal screens (avoids Navigator issues)
+//   - Sentinel files at /tmp/<app>-screenshots/<name>.ready
+//   - 2-3 seconds settle time per screen for animations
+//   - 8+ seconds for screens with countdowns or complex animations
+
+// class _ScreenshotCoordinator extends StatefulWidget {
+//   const _ScreenshotCoordinator();
+//   @override
+//   State<_ScreenshotCoordinator> createState() => _ScreenshotCoordinatorState();
+// }
+//
+// class _ScreenshotCoordinatorState extends State<_ScreenshotCoordinator> {
+//   int _tabIndex = 0;
+//   bool _showingOverlay = false;
+//   Widget? _overlayScreen;
+//
+//   // Tab screens — match your app's navigation structure
+//   final _screens = const [
+//     HomeScreen(),
+//     LibraryScreen(),
+//     ProgressScreen(),
+//     // SettingsScreen(), // Usually excluded from marketing
+//   ];
+//
+//   // Sentinel directory — the shell script watches this
+//   static const _sentinelDir = '/tmp/myapp-screenshots';
+//
+//   void _writeSentinel(String name) {
+//     try {
+//       final dir = Directory(_sentinelDir);
+//       if (!dir.existsSync()) dir.createSync(recursive: true);
+//       File('${dir.path}/$name.ready').writeAsStringSync(name);
+//       debugPrint('[Screenshot] Ready: $name');
+//     } catch (e) {
+//       debugPrint('[Screenshot] Sentinel write failed: $e');
+//     }
+//   }
+//
+//   void _writeDone() {
+//     try {
+//       File('$_sentinelDir/_done').writeAsStringSync('done');
+//       debugPrint('[Screenshot] All done!');
+//     } catch (_) {}
+//   }
+//
+//   @override
+//   void initState() {
+//     super.initState();
+//     // Clean previous sentinels
+//     try {
+//       final dir = Directory(_sentinelDir);
+//       if (dir.existsSync()) dir.deleteSync(recursive: true);
+//     } catch (_) {}
+//
+//     WidgetsBinding.instance.addPostFrameCallback((_) {
+//       _runCaptureSequence();
+//     });
+//   }
+//
+//   Future<void> _runCaptureSequence() async {
+//     const pause = Duration(seconds: 3);
+//
+//     // Wait for initial render + animations
+//     await Future.delayed(const Duration(seconds: 3));
+//
+//     // ===== TAB SCREENS =====
+//
+//     // Tab 0: Home
+//     setState(() { _tabIndex = 0; _showingOverlay = false; });
+//     await Future.delayed(const Duration(seconds: 2));
+//     _writeSentinel('01-home');
+//     await Future.delayed(pause);
+//
+//     // Tab 1: Library
+//     setState(() => _tabIndex = 1);
+//     await Future.delayed(const Duration(seconds: 2));
+//     _writeSentinel('02-library');
+//     await Future.delayed(pause);
+//
+//     // Tab 2: Progress
+//     setState(() => _tabIndex = 2);
+//     await Future.delayed(const Duration(seconds: 2));
+//     _writeSentinel('03-progress');
+//     await Future.delayed(pause);
+//
+//     // ===== DETAIL SCREENS (via overlay) =====
+//
+//     if (!mounted) return;
+//     final appState = context.read<AppState>();
+//     final item = appState.items.isNotEmpty ? appState.items[0] : null;
+//
+//     if (item != null) {
+//       setState(() {
+//         _showingOverlay = true;
+//         _overlayScreen = ItemDetailScreen(item: item);
+//       });
+//       await Future.delayed(const Duration(seconds: 2));
+//       _writeSentinel('04-item-detail');
+//       await Future.delayed(pause);
+//
+//       setState(() { _showingOverlay = false; _overlayScreen = null; });
+//       await Future.delayed(const Duration(seconds: 1));
+//     }
+//
+//     // ===== IMMERSIVE SCREENS =====
+//     // For screens with countdowns/animations, allow extra settle time.
+//
+//     // Return to home
+//     setState(() => _tabIndex = 0);
+//     await Future.delayed(const Duration(seconds: 1));
+//
+//     _writeDone();
+//   }
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     // Overlay takes over the entire screen (detail views, modals)
+//     if (_showingOverlay && _overlayScreen != null) {
+//       return _overlayScreen!;
+//     }
+//
+//     return Scaffold(
+//       body: IndexedStack(
+//         index: _tabIndex,
+//         children: _screens,
+//       ),
+//       bottomNavigationBar: NavigationBar(
+//         selectedIndex: _tabIndex,
+//         onDestinationSelected: (value) => setState(() => _tabIndex = value),
+//         destinations: const [
+//           NavigationDestination(icon: Icon(Icons.home), label: 'Home'),
+//           NavigationDestination(icon: Icon(Icons.library_books), label: 'Library'),
+//           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Progress'),
+//         ],
+//       ),
+//     );
+//   }
+// }
+
+// ============================================================================
+// MULTI-LOCALE CAPTURE
+// ============================================================================
+//
+// Unlike SwiftUI where each locale is a separate simctl launch, Flutter can
+// switch locales within a single run. Wrap the capture sequence in a locale loop:
+//
+// Future<void> _runCaptureSequence() async {
+//   final locales = [const Locale('en'), const Locale('de'), const Locale('es')];
+//   final appState = context.read<AppState>();
+//
+//   for (final locale in locales) {
+//     appState.setLocale(locale);
+//     await Future.delayed(const Duration(seconds: 1)); // Rebuild with new locale
+//
+//     // Capture all screens for this locale
+//     // Sentinel names include locale: '01-home-en', '01-home-de', etc.
+//     // Shell script output dir: marketing/en/, marketing/de/, etc.
+//   }
+// }

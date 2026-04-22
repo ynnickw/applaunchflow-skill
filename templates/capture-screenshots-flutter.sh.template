@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+#
+# Marketing screenshot capture for Flutter iOS apps.
+# Launches the app with the screenshot entry point, watches for sentinel
+# files, and captures each screen via simctl io.
+#
+# TEMPLATE — replace the values in the configuration block below.
+# The sentinel-watching logic is generic and works for any Flutter app.
+
+set -euo pipefail
+
+# ============================================================================
+# CONFIGURATION — edit these for your project
+# ============================================================================
+
+SENTINEL_DIR="/tmp/myapp-screenshots"    # Must match _sentinelDir in main_screenshots.dart
+OUT_DIR="marketing/en"                    # Output directory for screenshots
+ENTRY_POINT="lib/main_screenshots.dart"   # Screenshot entry point
+BUNDLE_ID="com.example.app"               # iOS bundle identifier
+TIMEOUT=120                               # Seconds to wait before failing
+
+# Screens to capture — must match sentinel names in the coordinator
+SCREENS=(
+    "01-home"
+    "02-library"
+    "03-progress"
+    "04-item-detail"
+    # Add more as needed
+)
+
+# ============================================================================
+# INTERNALS — no edits needed below this line
+# ============================================================================
+
+cd "$(dirname "$0")/.."
+
+# Find booted simulator
+DEVICE_ID=$(xcrun simctl list devices booted -j 2>/dev/null \
+    | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for runtime, devices in data['devices'].items():
+    for d in devices:
+        if d['state'] == 'Booted':
+            print(d['udid'])
+            sys.exit()
+" || true)
+
+if [ -z "${DEVICE_ID:-}" ]; then
+    echo "No booted simulator found. Boot one first:" >&2
+    echo "  xcrun simctl boot 'iPhone 17'" >&2
+    echo "  open -a Simulator" >&2
+    exit 1
+fi
+
+echo "==> Simulator: $DEVICE_ID"
+
+# Clean up previous run
+rm -rf "$SENTINEL_DIR"
+# Use absolute path for output to survive CWD resets
+ABS_OUT_DIR="$(pwd)/$OUT_DIR"
+mkdir -p "$ABS_OUT_DIR"
+
+# Kill existing app instance
+xcrun simctl terminate "$DEVICE_ID" "$BUNDLE_ID" 2>/dev/null || true
+sleep 1
+
+# Launch the app in screenshot mode
+echo "==> Building and launching screenshot mode..."
+flutter run -t "$ENTRY_POINT" -d "$DEVICE_ID" --no-hot 2>&1 &
+FLUTTER_PID=$!
+
+# Wait for the app to start (sentinel directory appears)
+echo "==> Waiting for app to start..."
+WAITED=0
+while [ ! -d "$SENTINEL_DIR" ]; do
+    sleep 1
+    WAITED=$((WAITED + 1))
+    if [ "$WAITED" -gt "$TIMEOUT" ]; then
+        echo "Timeout waiting for app to start after ${TIMEOUT}s." >&2
+        echo "Check that $ENTRY_POINT compiles and runs." >&2
+        kill $FLUTTER_PID 2>/dev/null || true
+        exit 1
+    fi
+done
+echo "==> App started. Capturing screenshots..."
+
+# Capture each screen when its sentinel appears
+for SCREEN in "${SCREENS[@]}"; do
+    WAITED=0
+    while [ ! -f "$SENTINEL_DIR/$SCREEN.ready" ]; do
+        sleep 0.5
+        WAITED=$((WAITED + 1))
+        if [ "$WAITED" -gt $((TIMEOUT * 2)) ]; then
+            echo "Timeout waiting for $SCREEN after ${TIMEOUT}s." >&2
+            echo "The coordinator may have crashed. Check the flutter log above." >&2
+            break 2
+        fi
+    done
+
+    # Brief pause to ensure rendering is fully settled
+    sleep 0.5
+
+    # Capture via simctl — MUST use absolute path
+    xcrun simctl io "$DEVICE_ID" screenshot "$ABS_OUT_DIR/$SCREEN.png" 2>/dev/null
+    echo "    ✓ $SCREEN"
+done
+
+# Wait for the done sentinel
+WAITED=0
+while [ ! -f "$SENTINEL_DIR/_done" ]; do
+    sleep 1
+    WAITED=$((WAITED + 1))
+    if [ "$WAITED" -gt 30 ]; then
+        echo "Warning: _done sentinel not received (coordinator may have crashed)." >&2
+        break
+    fi
+done
+
+# Clean up flutter process
+kill $FLUTTER_PID 2>/dev/null || true
+wait $FLUTTER_PID 2>/dev/null || true
+
+# Report results
+COUNT=$(find "$ABS_OUT_DIR" -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
+echo ""
+echo "==> Done! $COUNT screenshots in $OUT_DIR/"
+find "$ABS_OUT_DIR" -name "*.png" -exec ls -la {} \; | sort

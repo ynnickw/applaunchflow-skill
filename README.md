@@ -1,27 +1,43 @@
-[![bloom-banner-01-light-tags-1500x500](https://github.com/user-attachments/assets/31139b9d-1b89-44e8-b563-5bb7ba150b7b)](https://bloom.parthjadhav.com)
+<p align="center">
+  <img src="logo.png" alt="AppLaunchFlow" width="120" />
+</p>
 
-# iOS Marketing Capture
+<h1 align="center">AppLaunchFlow Screenshot Capture Skill</h1>
 
-A skill for AI-powered coding agents (Claude Code, Cursor, Windsurf, etc.) that automates marketing screenshot capture for SwiftUI iOS apps. It builds an in-app capture system, seeds demo data, snapshots every screen and UI element, and loops across all your locales automatically.
+<p align="center">
+  AI agent skill for automated App Store screenshot capture — forked from <a href="https://github.com/ParthJadhav/ios-marketing-capture">ParthJadhav/ios-marketing-capture</a> and adapted for the <a href="https://applaunchflow.com">AppLaunchFlow</a> pipeline.
+</p>
 
-#### Built for and used by Bloom - https://apps.apple.com/us/app/bloom-coffee-shelf-recipe/id6759914524
+---
+
+## What changed from the original
+
+This fork extends the original iOS Marketing Capture skill with:
+
+- **Flutter support** — full screenshot capture path for Flutter apps using offline mode, `simctl io` capture, and in-process locale switching
+- **Auto-detection over interviews** — the skill now infers screens, locales, devices, seed data, and appearance from the codebase instead of asking the user a long questionnaire
+- **App Store candidate evaluation** — after capture, the skill evaluates screenshots and preselects up to 10 store-ready candidates based on visual strength, feature relevance, and composability
+- **AppLaunchFlow MCP handoff** — curated screenshots are automatically handed off to the [AppLaunchFlow MCP](https://github.com/ynnickw/applaunchflow-mcp) for template-based layout generation (device mockups, headlines, backgrounds)
+- **8 Flutter-specific gotchas** documented from real projects (Firestore overwriting seed data, Provider type mismatches, animation settle times, etc.)
+
+Everything from the original SwiftUI path is preserved — the 11 SwiftUI gotchas, step-based coordinator, element rendering, and locale looping all work as before.
 
 ## What it does
 
-- Adds a `#if DEBUG`-gated capture system to your app target — zero production footprint
+- Builds an in-app capture system for **SwiftUI** and **Flutter** iOS apps — zero production footprint
 - Seeds deterministic demo data so every screenshot looks populated and polished
-- Navigates to each screen programmatically via a step-based coordinator
-- Snapshots the full window including status bar, safe area, and presented sheets
-- Renders isolated elements (cards, widgets, charts) via `ImageRenderer` at 3x with transparency
-- Loops every locale automatically — one build, N relaunches with `-AppleLanguages`
-- Works with any SwiftUI navigation pattern: `TabView`, `NavigationStack`, `NavigationSplitView`
+- Navigates to each screen programmatically and snapshots including status bar and safe area
+- Renders isolated elements (cards, widgets, charts) with transparency
+- Loops every locale automatically — one build, all languages
+- Evaluates results and preselects the strongest shots for App Store use
+- Hands off to AppLaunchFlow MCP for layout generation (optional)
 
 ## Install
 
 ### Using npx skills (recommended)
 
 ```bash
-npx skills add ParthJadhav/ios-marketing-capture
+npx skills add ynnickw/applaunchflow-skill
 ```
 
 This works with Claude Code, Cursor, Windsurf, OpenCode, Codex, and [40+ other agents](https://github.com/vercel-labs/skills#available-agents).
@@ -29,19 +45,19 @@ This works with Claude Code, Cursor, Windsurf, OpenCode, Codex, and [40+ other a
 Install globally (available across all projects):
 
 ```bash
-npx skills add ParthJadhav/ios-marketing-capture -g
+npx skills add ynnickw/applaunchflow-skill -g
 ```
 
 Install for a specific agent:
 
 ```bash
-npx skills add ParthJadhav/ios-marketing-capture -a claude-code
+npx skills add ynnickw/applaunchflow-skill -a claude-code
 ```
 
 ### Manual (git clone)
 
 ```bash
-git clone https://github.com/ParthJadhav/ios-marketing-capture ~/.claude/skills/ios-marketing-capture
+git clone https://github.com/ynnickw/applaunchflow-skill ~/.claude/skills/applaunchflow-skill
 ```
 
 ## Usage
@@ -59,13 +75,20 @@ Or just tell the agent what you need:
 > Capture marketing screenshots for my app across all locales
 ```
 
-The agent will ask you about your screens, elements, locales, device, appearance, and seed data before writing any code.
+The agent explores your codebase, detects screens/locales/devices automatically, and proceeds. It only asks when something is genuinely ambiguous.
 
 ## Example prompts
 
-These are good starting prompts because they provide context while still leaving room for the skill to guide the process.
+### Breathwork app (Flutter)
 
-### Coffee app
+```text
+Capture marketing screenshots for my Flutter breathing app.
+I want all 4 tabs: Home, Routine, Library, and Progress.
+Also capture the technique detail screen and the breathing session player mid-session.
+English and German, iPhone 17 simulator.
+```
+
+### Coffee app (SwiftUI)
 
 ```text
 Capture marketing screenshots for my coffee tracking app.
@@ -74,111 +97,15 @@ Also render coffee cards and all my widgets as isolated elements.
 Capture across en, de, es, fr, ja.
 ```
 
-### Habit tracker
+### Minimal prompt
 
 ```text
-Generate locale screenshots for my habit tracker app.
-I need the dashboard, habit detail, streak view, and settings.
-Light mode only, iPhone 17 simulator.
-All 5 locales in my Localizable.xcstrings.
+Capture marketing screenshots for my app
 ```
 
-### Finance app
+The skill will auto-detect everything and proceed.
 
-```text
-Capture marketing assets for my finance app.
-I want the overview, transaction list, budget detail, and charts.
-Render the spending chart and category cards as isolated elements.
-English and German only.
-```
-
-### Fitness app with widgets
-
-```text
-Automate App Store screenshot capture for my workout app.
-Capture the main dashboard, workout detail mid-session, and history.
-Render all my WidgetKit widgets (small, medium, lock screen) as isolated PNGs.
-```
-
-## Better prompt tips
-
-- List the exact screens you want captured by tab name or navigation path
-- Mention any components you want rendered independently (cards, widgets, charts)
-- Specify locales explicitly or say "all locales in my xcstrings"
-- Say which simulator and iOS version you want
-- Mention if any screen needs to be captured in a non-default state (e.g. timer mid-countdown)
-- Say light only, dark only, or both
-
-## How it works
-
-### In-app capture mode, not XCUITest
-
-The skill uses an in-app capture approach instead of XCUITest / Fastlane:
-
-- **No test target surgery** — many projects have none, and adding one means fragile pbxproj edits
-- **Direct access to everything** — ViewModels, SwiftData, `ImageRenderer`, `UIWindow.drawHierarchy`
-- **Faster** — `xcodebuild build` once, then `simctl launch` per locale (no test-bundle overhead)
-- **Element renders require it** — `ImageRenderer` on widget views must run inside the app process
-
-### Step-based coordinator
-
-Each screenshot is a self-contained `CaptureStep`:
-
-```swift
-struct CaptureStep {
-    let name: String                         // "01-home"
-    let navigate: @MainActor () -> Void      // put the app in the right state
-    let settle: Duration                     // wait for animations
-    let cleanup: (@MainActor () -> Void)?    // tear down before next step
-}
-```
-
-The coordinator is a simple loop — no hardcoded screen sequences. The agent composes steps for your specific navigation architecture.
-
-### Navigation patterns
-
-The skill covers three navigation architectures:
-
-| Pattern | How steps drive it |
-|---------|-------------------|
-| `TabView(selection:)` | `setTab(index)` |
-| `NavigationStack` + router | `router.push(.route)` / `router.popToRoot()` |
-| `NavigationSplitView` | Set sidebar + detail selection bindings |
-
-### Element rendering
-
-Isolated components are rendered via `ImageRenderer` at 3x scale with natural background inside rounded corners and transparency outside:
-
-```swift
-MarketingElementHarness.renderElement(
-    name: "card-morning-blend",
-    width: 380,
-    cornerRadius: 20,
-    background: theme.background
-) {
-    CoffeeCard(coffee: coffee, theme: theme)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-}
-```
-
-Widget rendering handles the quirks of rendering WidgetKit views outside the widget process (missing `containerBackground`, missing padding, `ProgressView` rendering bugs).
-
-## What gets generated
-
-The skill guides the agent to create:
-
-```
-YourApp/
-├── Debug/
-│   └── MarketingCapture.swift      # Capture system (DEBUG-only)
-├── ContentView.swift               # Modified — DEBUG hook for seed + coordinator
-├── Views/.../TimerView.swift       # Modified — primed state hooks (if needed)
-scripts/
-└── capture-marketing.sh            # Build + install + per-locale loop
-```
-
-### Output layout
+## Output
 
 ```
 marketing/
@@ -189,50 +116,29 @@ marketing/
         elements/
             card-morning-blend.png
             widget-pulse-small.png
-            chart-cupping.png
     de/
-        ...
-    es/
         ...
 ```
 
-## Known gotchas
-
-The skill documents 11 real bugs discovered during development. These are all baked into the skill's guidance so the agent avoids them automatically:
-
-| # | Gotcha | What happens |
-|---|--------|--------------|
-| 1 | Live Activities persist across launches | Next locale crashes on stale SwiftData references |
-| 2 | Re-seeding per locale | CloudKit sync churn causes crashes |
-| 3 | VMs setup before seed | Hold stale empty snapshots |
-| 4 | Setting trigger binding to nil | Doesn't dismiss fullScreenCover — wrong screenshot |
-| 5 | NavigationPath can't be popped externally | Must capture clean stack before pushed detail |
-| 6 | `membershipExceptions` is an INCLUSION list | Widget target membership goes backwards |
-| 7 | `ImageRenderer` + `ProgressView` | Renders as prohibited symbol without explicit style |
-| 8 | `.containerBackground` outside WidgetKit | No-op — widget renders have no background |
-| 9 | iPhone 8 Plus gone on iOS 26 | Legacy 6.5" simulator unavailable |
-| 10 | Locale launch argument format | Parens are mandatory: `(xx)` not `xx` |
-| 11 | SwiftUI animations in ImageRenderer | Captures frame 0, not the animated state |
-
-## Pairs well with
-
-Use [app-store-screenshots](https://github.com/ParthJadhav/app-store-screenshots) as a post-processing step to composite the captured PNGs into Apple-style marketing pages with device mockups, headlines, and gradients.
+After capture, the skill evaluates all full-screen shots and produces a shortlist of up to 10 App-Store-ready candidates. If the AppLaunchFlow MCP is configured, it uploads and generates layouts automatically.
 
 ## Requirements
 
-- Xcode 16+ (synchronized folder groups support)
-- iOS 17+ deployment target (for `ImageRenderer`, `@Observable`)
+### SwiftUI
+- Xcode 16+
+- iOS 17+ deployment target
 - A simulator runtime matching your target iOS version
-- Python 3 (used by the shell script for JSON parsing)
+- Python 3
 
-## Contributing
+### Flutter
+- Flutter SDK 3.10+
+- Xcode (for iOS simulator)
+- A booted iOS simulator
+- Python 3
 
-Contributions are welcome, especially around:
+## Credits
 
-- Support for additional navigation patterns
-- New gotcha documentation from real projects
-- Cross-agent compatibility improvements
-- Clearer docs and onboarding
+Forked from [ParthJadhav/ios-marketing-capture](https://github.com/ParthJadhav/ios-marketing-capture), originally built for [Bloom](https://apps.apple.com/us/app/bloom-coffee-shelf-recipe/id6759914524).
 
 ## License
 
