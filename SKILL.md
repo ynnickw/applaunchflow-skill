@@ -1,5 +1,5 @@
 ---
-name: ios-marketing-capture
+name: applaunchflow
 description: Use when the user wants to automate capture of marketing screenshots for a SwiftUI or Flutter iOS app across multiple locales, devices, or appearances. Covers full-screen shots, isolated element renders (carousel cards, widgets), and reproducible output naming. Triggers on marketing screenshots, locale screenshots, widget renders, App Store assets, fastlane-alternative, simctl screenshots, flutter screenshots.
 ---
 
