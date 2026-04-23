@@ -187,6 +187,33 @@ After Step 6 shortlist evaluation is done, ask the user:
 
 If the user declines, stop here — the capture pipeline is done.
 
+#### MCP setup check
+
+Before calling any AppLaunchFlow MCP tool, verify the MCP server is available. Try calling `list_projects` as a lightweight probe.
+
+If the MCP tools are **not available** (tool not found, connection error, or the `applaunchflow` MCP is not listed):
+
+1. Tell the user the MCP server needs to be configured first.
+2. Run the following command to add it to Claude Code's project settings:
+
+   ```bash
+   claude mcp add applaunchflow -- npx -y @applaunchflow/mcp@latest
+   ```
+
+3. After adding, tell the user to restart Claude Code for the MCP to take effect:
+
+   > "The AppLaunchFlow MCP server has been added to your project settings. Please restart Claude Code (exit and reopen) so the MCP server is loaded, then ask me to continue with layout generation."
+
+4. Stop here. Do not attempt MCP calls until the user restarts and resumes.
+
+If the MCP tools are available but a call returns an **auth error**, tell the user to authenticate:
+
+```bash
+npx @applaunchflow/mcp@latest auth login
+```
+
+Then retry the failed call.
+
 #### 7a. Create project
 
 Use the `create_project` MCP tool. Infer values from the codebase explored in Step 2:
@@ -246,7 +273,8 @@ If yes, use the `translate_layouts` MCP tool:
 
 #### Error handling
 
-- **Auth failures on any MCP call:** Tell the user to verify the AppLaunchFlow MCP server is configured and authenticated (`npx @applaunchflow/mcp@latest auth login`).
+- **MCP tools not found:** The server is not configured. Follow the "MCP setup check" instructions above to add it.
+- **Auth failures on any MCP call:** Tell the user to authenticate with `npx @applaunchflow/mcp@latest auth login`.
 - **`upload_screenshots` fails:** Verify files exist at `marketing/<locale>/` by listing the directory.
 - **`generate_layouts` fails:** Call `list_screenshots` to verify uploads succeeded.
 - **`browse_templates` returns a URL instead of completing interactively:** Present the gallery URL to the user and ask them to reply with the template name or id.
